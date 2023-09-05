@@ -117,12 +117,7 @@ impl<'a> CodeWriter<'a> {
     }
 
     fn write(&mut self, line: &str) {
-        write!(
-            &mut self.writer,
-            "{} // line {}\n",
-            line, self.lines_written
-        )
-        .unwrap();
+        write!(&mut self.writer, "{}\n", line).unwrap();
         self.lines_written += 1;
     }
 
