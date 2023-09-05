@@ -1,6 +1,6 @@
 use crate::{code_writer::CodeWriter, op_code::OpCode, parser::Parser};
 use anyhow::{Context, Ok, Result};
-use std::{fs::File, io::BufWriter};
+use std::{fs::File, io::BufWriter, path::Path};
 
 pub struct Translator {
     input_file: File,
@@ -27,7 +27,13 @@ impl Translator {
         let output_file =
             File::create(self.out_filepath.as_str()).context("Error creating output file")?;
         let mut writer = BufWriter::new(output_file);
-        let mut code_writer = CodeWriter::new(&mut writer);
+        let filename = Path::new(&self.out_filepath)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace(".asm", "");
+        let mut code_writer = CodeWriter::new(&mut writer, &filename);
 
         let op_codes = parser.parse();
         for op_code in op_codes {

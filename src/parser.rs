@@ -57,7 +57,10 @@ impl Parser {
                 "and" => OpCode::And,
                 "or" => OpCode::Or,
                 "not" => OpCode::Not,
-                _ => panic!("invalid op code"),
+                _ => {
+                    println!("Invalid instruction >>> `{}`", instruction);
+                    panic!("Invalid instruction")
+                }
             };
 
             instructions.push(op_code)

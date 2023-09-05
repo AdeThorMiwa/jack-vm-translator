@@ -5,6 +5,12 @@ pub struct SegmentOpCode<'a> {
     pub offset: u32,
 }
 
+impl<'a> SegmentOpCode<'a> {
+    pub fn is_scoped_segment(&self) -> bool {
+        ["local", "argument", "this", "that"].contains(&self.segment)
+    }
+}
+
 pub enum OpCode<'a> {
     Add,
     Sub,

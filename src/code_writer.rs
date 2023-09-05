@@ -33,13 +33,15 @@ use std::io::Write;
 pub struct CodeWriter<'a> {
     writer: &'a mut dyn Write,
     lines_written: u32,
+    static_prefix: &'a str,
 }
 
 impl<'a> CodeWriter<'a> {
-    pub fn new(writer: &'a mut dyn Write) -> Self {
+    pub fn new(writer: &'a mut dyn Write, static_prefix: &'a str) -> Self {
         Self {
             writer,
             lines_written: 0,
+            static_prefix,
         }
     }
 
@@ -86,26 +88,85 @@ impl<'a> CodeWriter<'a> {
     }
 
     pub fn write_push(&mut self, op_code: SegmentOpCode) {
-        match op_code.segment {
-            "constant" => {
-                // store constant in D Register
-                self.write(&format!("@{}", op_code.offset));
-                self.write("D=A");
-
-                // push value of D Register to stack
-                self.write("@SP");
-                self.write("A=M");
-                self.write("M=D");
-
-                // increment SP
-                self.write("@SP");
-                self.write("M=M+1");
+        // retrieve value from segment and store in D Register
+        if op_code.is_scoped_segment() {
+            match op_code.segment {
+                "local" => self.write("@LCL"),
+                "argument" => self.write("@ARG"),
+                "this" => self.write("@THIS"),
+                "that" => self.write("@THAT"),
+                _ => {}
             }
-            _ => {}
+
+            self.write("D=M");
+            self.write(&format!("@{}", op_code.offset));
+            self.write("A=D+A");
+            self.write("D=M");
+        } else if op_code.segment == "constant" {
+            self.write(&format!("@{}", op_code.offset));
+            self.write("D=A");
+        } else {
+            match op_code.segment {
+                "temp" => self.write(&format!("@{}", 5 + op_code.offset)),
+                "pointer" => self.write(&format!("@{}", 3 + op_code.offset)),
+                "static" => self.write(&format!("@{}.{}", self.static_prefix, op_code.offset)),
+                _ => {}
+            }
+
+            self.write("D=M");
         }
+
+        // push value of D Register to stack
+        self.write("@SP");
+        self.write("A=M");
+        self.write("M=D");
+
+        // increment SP
+        self.write("@SP");
+        self.write("M=M+1");
     }
 
-    pub fn write_pop(&self, _op_code: SegmentOpCode) {}
+    pub fn write_pop(&mut self, op_code: SegmentOpCode) {
+        if op_code.is_scoped_segment() {
+            // set segment
+            match op_code.segment {
+                "local" => self.write("@LCL"),
+                "argument" => self.write("@ARG"),
+                "this" => self.write("@THIS"),
+                "that" => self.write("@THAT"),
+                _ => {}
+            }
+
+            // get address
+            self.write("D=M");
+            self.write(&format!("@{}", op_code.offset));
+            self.write("D=D+A");
+        } else {
+            match op_code.segment {
+                "temp" => self.write(&format!("@{}", 5 + op_code.offset)),
+                "pointer" => self.write(&format!("@{}", 3 + op_code.offset)),
+                "static" => self.write(&format!("@{}.{}", self.static_prefix, op_code.offset)),
+                _ => {}
+            }
+
+            self.write("D=A");
+        }
+
+        // store address in @R13
+        self.write("@R13");
+        self.write("M=D");
+
+        // pop value
+        self.write("@SP");
+        self.write("AM=M-1");
+        self.write("D=M");
+        self.write("M=0");
+
+        // update address to popped value
+        self.write("@R13");
+        self.write("A=M");
+        self.write("M=D");
+    }
 
     pub fn comment(&mut self, comment: &str) {
         write!(&mut self.writer, "// {}\n", comment).unwrap();
