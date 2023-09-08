@@ -1,4 +1,4 @@
-use crate::op_code::{OpCode, SegmentOpCode};
+use crate::op_code::{LabelOpCode, OpCode, SegmentOpCode};
 use anyhow::{Ok, Result};
 use std::io::Write;
 
@@ -34,18 +34,42 @@ pub struct CodeWriter<'a> {
     writer: &'a mut dyn Write,
     lines_written: u32,
     static_prefix: &'a str,
+    func_name: Option<String>,
 }
 
 impl<'a> CodeWriter<'a> {
     pub fn new(writer: &'a mut dyn Write, static_prefix: &'a str) -> Self {
-        Self {
+        let mut code_writer = Self {
             writer,
             lines_written: 0,
             static_prefix,
+            func_name: None,
+        };
+
+        // VM Initialization
+        code_writer.write_init();
+
+        code_writer
+    }
+
+    fn write_init(&mut self) {
+        // bootstrap code
+        // this must be placed at the beginning of the output file
+    }
+
+    pub fn set_current_func(&mut self, name: Option<String>) {
+        self.func_name = name
+    }
+
+    fn get_current_func(&self) -> &str {
+        if self.func_name.is_some() {
+            self.func_name.as_ref().unwrap()
+        } else {
+            "Main"
         }
     }
 
-    pub fn write_arithmetic(&mut self, op_code: OpCode) {
+    pub fn write_arithmetic(&mut self, op_code: &OpCode) {
         match op_code {
             OpCode::Add => {
                 self.write_double_operand();
@@ -87,7 +111,7 @@ impl<'a> CodeWriter<'a> {
         self.write("M=M+1");
     }
 
-    pub fn write_push(&mut self, op_code: SegmentOpCode) {
+    pub fn write_push(&mut self, op_code: &SegmentOpCode) {
         // retrieve value from segment and store in D Register
         if op_code.is_scoped_segment() {
             match op_code.segment {
@@ -126,7 +150,7 @@ impl<'a> CodeWriter<'a> {
         self.write("M=M+1");
     }
 
-    pub fn write_pop(&mut self, op_code: SegmentOpCode) {
+    pub fn write_pop(&mut self, op_code: &SegmentOpCode) {
         if op_code.is_scoped_segment() {
             // set segment
             match op_code.segment {
@@ -145,7 +169,7 @@ impl<'a> CodeWriter<'a> {
             match op_code.segment {
                 "temp" => self.write(&format!("@{}", 5 + op_code.offset)),
                 "pointer" => self.write(&format!("@{}", 3 + op_code.offset)),
-                "static" => self.write(&format!("@{}.{}", self.static_prefix, op_code.offset)),
+                "static" => self.write(&format!("@{}.{}", self.static_prefix, op_code.offset)), // TODO: recheck if filename should be for individual compiled files or output file
                 _ => {}
             }
 
@@ -168,6 +192,45 @@ impl<'a> CodeWriter<'a> {
         self.write("M=D");
     }
 
+    pub fn write_label(&mut self, op_code: &LabelOpCode) {
+        let func_name = self.get_current_func();
+        self.label(&format!("({}__{})", func_name, op_code.label))
+    }
+
+    pub fn write_goto(&mut self, op_code: &LabelOpCode) {
+        let func_name = self.get_current_func();
+        self.write(&format!("@{}__{}", func_name, op_code.label));
+        self.write("0;JMP")
+    }
+
+    pub fn write_if(&mut self, op_code: &LabelOpCode) {
+        // get the value on top of the stack
+        self.write_single_operand();
+
+        let func_name = self.get_current_func();
+        self.write(&format!("@{}__{}", func_name, op_code.label));
+        self.write("D;JNE")
+    }
+
+    pub fn write_call(&mut self, func_name: &str, num_args: u8) {
+        let return_address = format!("");
+        // push return-address
+        // push LCL
+        // push ARG
+        // push THIS
+        // push THAT
+        // ARG = SP-n-5
+        // LCL = SP
+        // goto f
+        // (return-address)
+    }
+
+    pub fn write_return(&mut self) {}
+
+    pub fn write_function(&mut self, func_name: &str, num_locals: u8) {
+        self.set_current_func(Some(func_name.to_string()))
+    }
+
     pub fn comment(&mut self, comment: &str) {
         write!(&mut self.writer, "// {}\n", comment).unwrap();
     }
@@ -178,8 +241,12 @@ impl<'a> CodeWriter<'a> {
     }
 
     fn write(&mut self, line: &str) {
-        write!(&mut self.writer, "{}\n", line).unwrap();
+        write!(&mut self.writer, "\t{}\n", line).unwrap();
         self.lines_written += 1;
+    }
+
+    fn label(&mut self, line: &str) {
+        write!(&mut self.writer, "{}\n", line).unwrap();
     }
 
     fn write_double_operand(&mut self) {

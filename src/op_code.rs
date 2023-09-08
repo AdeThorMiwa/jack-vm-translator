@@ -11,6 +11,10 @@ impl<'a> SegmentOpCode<'a> {
     }
 }
 
+pub struct LabelOpCode<'a> {
+    pub label: &'a str,
+}
+
 pub enum OpCode<'a> {
     Add,
     Sub,
@@ -23,6 +27,12 @@ pub enum OpCode<'a> {
     Not,
     Push(SegmentOpCode<'a>),
     Pop(SegmentOpCode<'a>),
+    Label(LabelOpCode<'a>),
+    Goto(LabelOpCode<'a>),
+    If(LabelOpCode<'a>),
+    Call { func_name: &'a str, num_args: u8 },
+    Return,
+    Function { func_name: &'a str, num_locals: u8 },
 }
 
 impl Display for OpCode<'_> {
@@ -38,7 +48,19 @@ impl Display for OpCode<'_> {
             Self::Or => "or".to_owned(),
             Self::Not => "not".to_owned(),
             Self::Push(op) => format!("push {} {}", op.segment, op.offset),
-            Self::Pop(op) => format!("pop {} {}", &op.segment, &op.offset),
+            Self::Pop(op) => format!("pop {} {}", op.segment, op.offset),
+            Self::Label(op) => format!("label {}", op.label),
+            Self::Goto(op) => format!("goto {}", op.label),
+            Self::If(op) => format!("if-goto {}", op.label),
+            Self::Call {
+                func_name,
+                num_args,
+            } => format!("call {} {}", func_name, num_args),
+            Self::Function {
+                func_name,
+                num_locals,
+            } => format!("function {} {}", func_name, num_locals),
+            Self::Return => "return".to_owned(),
         };
 
         write!(f, "{}", v)

@@ -48,9 +48,21 @@ impl Translator {
                 | OpCode::Lt
                 | OpCode::And
                 | OpCode::Or
-                | OpCode::Not => code_writer.write_arithmetic(op_code),
-                OpCode::Push(push_op_code) => code_writer.write_push(push_op_code),
-                OpCode::Pop(pop_op_code) => code_writer.write_pop(pop_op_code),
+                | OpCode::Not => code_writer.write_arithmetic(&op_code),
+                OpCode::Push(push_op_code) => code_writer.write_push(&push_op_code),
+                OpCode::Pop(pop_op_code) => code_writer.write_pop(&pop_op_code),
+                OpCode::Label(op_code) => code_writer.write_label(&op_code),
+                OpCode::Goto(op_code) => code_writer.write_goto(&op_code),
+                OpCode::If(op_code) => code_writer.write_if(&op_code),
+                OpCode::Call {
+                    func_name,
+                    num_args,
+                } => code_writer.write_call(func_name, num_args),
+                OpCode::Function {
+                    func_name,
+                    num_locals,
+                } => code_writer.write_function(func_name, num_locals),
+                OpCode::Return => code_writer.write_return(),
             };
         }
 
