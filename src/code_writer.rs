@@ -30,20 +30,40 @@ use std::io::Write;
  * 8. constant
  */
 
+struct FunctionNameStack(Vec<String>);
+
+impl FunctionNameStack {
+    fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    fn push(&mut self, func_name: &str) {
+        self.0.push(func_name.to_owned())
+    }
+
+    fn pop(&mut self) {
+        self.0.pop();
+    }
+
+    fn peek(&self) -> Option<String> {
+        self.0.last().map(|i| i.to_owned())
+    }
+}
+
 pub struct CodeWriter<'a> {
     writer: &'a mut dyn Write,
     lines_written: u32,
-    static_prefix: &'a str,
-    func_name: Option<String>,
+    current_filename: String,
+    function_name: FunctionNameStack,
 }
 
 impl<'a> CodeWriter<'a> {
-    pub fn new(writer: &'a mut dyn Write, static_prefix: &'a str) -> Self {
+    pub fn new(writer: &'a mut dyn Write) -> Self {
         let mut code_writer = Self {
             writer,
             lines_written: 0,
-            static_prefix,
-            func_name: None,
+            current_filename: "Main".to_owned(),
+            function_name: FunctionNameStack::new(),
         };
 
         // VM Initialization
@@ -57,16 +77,29 @@ impl<'a> CodeWriter<'a> {
         // this must be placed at the beginning of the output file
     }
 
-    pub fn set_current_func(&mut self, name: Option<String>) {
-        self.func_name = name
+    pub fn set_current_filename(&mut self, filename: &str) {
+        println!("current file name >>> {}", filename);
+        self.current_filename = filename.to_owned()
     }
 
-    fn get_current_func(&self) -> &str {
-        if self.func_name.is_some() {
-            self.func_name.as_ref().unwrap()
+    fn get_current_func(&self) -> String {
+        let func_name = self.function_name.peek();
+        if func_name.is_some() {
+            func_name.unwrap()
         } else {
-            "Main"
+            "Main".to_owned()
         }
+    }
+
+    fn write_to_stack(&mut self) {
+        // push value of D Register to stack
+        self.write("@SP");
+        self.write("A=M");
+        self.write("M=D");
+
+        // increment SP
+        self.write("@SP");
+        self.write("M=M+1");
     }
 
     pub fn write_arithmetic(&mut self, op_code: &OpCode) {
@@ -80,7 +113,7 @@ impl<'a> CodeWriter<'a> {
                 self.write("D=M-D")
             }
             OpCode::Neg => {
-                self.write_single_operand();
+                self.pop_stack();
                 self.write("D=-D")
             }
             OpCode::Eq => self.write_conditional("D;JEQ"),
@@ -95,7 +128,7 @@ impl<'a> CodeWriter<'a> {
                 self.write("D=D|M")
             }
             OpCode::Not => {
-                self.write_single_operand();
+                self.pop_stack();
                 self.write("D=!D")
             }
             _ => self.comment("Invalid Opcode"),
@@ -133,21 +166,14 @@ impl<'a> CodeWriter<'a> {
             match op_code.segment {
                 "temp" => self.write(&format!("@{}", 5 + op_code.offset)),
                 "pointer" => self.write(&format!("@{}", 3 + op_code.offset)),
-                "static" => self.write(&format!("@{}.{}", self.static_prefix, op_code.offset)),
+                "static" => self.write(&format!("@{}.{}", self.current_filename, op_code.offset)),
                 _ => {}
             }
 
             self.write("D=M");
         }
 
-        // push value of D Register to stack
-        self.write("@SP");
-        self.write("A=M");
-        self.write("M=D");
-
-        // increment SP
-        self.write("@SP");
-        self.write("M=M+1");
+        self.write_to_stack()
     }
 
     pub fn write_pop(&mut self, op_code: &SegmentOpCode) {
@@ -169,7 +195,7 @@ impl<'a> CodeWriter<'a> {
             match op_code.segment {
                 "temp" => self.write(&format!("@{}", 5 + op_code.offset)),
                 "pointer" => self.write(&format!("@{}", 3 + op_code.offset)),
-                "static" => self.write(&format!("@{}.{}", self.static_prefix, op_code.offset)), // TODO: recheck if filename should be for individual compiled files or output file
+                "static" => self.write(&format!("@{}.{}", self.current_filename, op_code.offset)), // TODO: recheck if filename should be for individual compiled files or output file
                 _ => {}
             }
 
@@ -180,7 +206,7 @@ impl<'a> CodeWriter<'a> {
         self.write("@R13");
         self.write("M=D");
 
-        // pop value
+        // pop_stack value
         self.write("@SP");
         self.write("AM=M-1");
         self.write("D=M");
@@ -192,9 +218,9 @@ impl<'a> CodeWriter<'a> {
         self.write("M=D");
     }
 
-    pub fn write_label(&mut self, op_code: &LabelOpCode) {
+    pub fn write_label(&mut self, label: &str) {
         let func_name = self.get_current_func();
-        self.label(&format!("({}__{})", func_name, op_code.label))
+        self.label(&format!("({}__{})", func_name, label))
     }
 
     pub fn write_goto(&mut self, op_code: &LabelOpCode) {
@@ -205,7 +231,7 @@ impl<'a> CodeWriter<'a> {
 
     pub fn write_if(&mut self, op_code: &LabelOpCode) {
         // get the value on top of the stack
-        self.write_single_operand();
+        self.pop_stack();
 
         let func_name = self.get_current_func();
         self.write(&format!("@{}__{}", func_name, op_code.label));
@@ -213,22 +239,158 @@ impl<'a> CodeWriter<'a> {
     }
 
     pub fn write_call(&mut self, func_name: &str, num_args: u8) {
-        let return_address = format!("");
         // push return-address
+        let return_address = format!("$ret__{}", 1);
+        self.write(&format!("@{}", return_address));
+        self.write("D=A");
+        self.write_to_stack();
+
         // push LCL
+        self.write("@LCL");
+        self.write("D=M");
+        self.write_to_stack();
+
         // push ARG
+        self.write("@ARG");
+        self.write("D=M");
+        self.write_to_stack();
+
         // push THIS
+        self.write("@THIS");
+        self.write("D=M");
+        self.write_to_stack();
+
         // push THAT
+        self.write("@THAT");
+        self.write("D=M");
+        self.write_to_stack();
+
         // ARG = SP-n-5
+        self.write("@SP");
+        self.write("D=M");
+        self.write(&format!("@{}", num_args - 5));
+        self.write("D=D-A");
+        self.write("@ARG");
+        self.write("M=D");
+
         // LCL = SP
+        self.write("@SP");
+        self.write("D=M");
+        self.write("@LCL");
+        self.write("M=D");
+
         // goto f
+        self.write_goto(&LabelOpCode { label: func_name });
+
         // (return-address)
+        self.write_label(&return_address);
     }
 
-    pub fn write_return(&mut self) {}
+    pub fn write_return(&mut self) {
+        // FRAME = LCL
+        self.write("@LCL");
+        self.write("D=M");
+        self.write("@R6");
+        self.write("M=D");
+
+        // RET = *(FRAME-5)
+        self.write("@R6");
+        self.write("D=M");
+        self.write("@5");
+        self.write("D=D-A");
+        self.write("A=D");
+        self.write("D=M");
+        self.write("@R7");
+        self.write("M=D");
+
+        // *ARG = pop_stack()
+        self.pop_stack();
+        self.write("@ARG");
+        self.write("A=M");
+        self.write("M=D");
+
+        // SP = ARG+1
+        self.write("@ARG");
+        self.write("D=M+1");
+        self.write("@SP");
+        self.write("M=D");
+
+        // THAT = *(FRAME-1)
+        self.write("@R6");
+        self.write("D=M");
+        self.write("@1");
+        self.write("D=D-A");
+        self.write("A=D");
+        self.write("D=M");
+        self.write("@THAT");
+        self.write("M=D");
+
+        // THIS = *(FRAME-2)
+        self.write("@R6");
+        self.write("D=M");
+        self.write("@2");
+        self.write("D=D-A");
+        self.write("A=D");
+        self.write("D=M");
+        self.write("@THIS");
+        self.write("M=D");
+
+        // ARG = *(FRAME-3)
+        self.write("@R6");
+        self.write("D=M");
+        self.write("@3");
+        self.write("D=D-A");
+        self.write("A=D");
+        self.write("D=M");
+        self.write("@ARG");
+        self.write("M=D");
+
+        // LCL = *(FRAME-4)
+        self.write("@R6");
+        self.write("D=M");
+        self.write("@4");
+        self.write("D=D-A");
+        self.write("A=D");
+        self.write("D=M");
+        self.write("@LCL");
+        self.write("M=D");
+
+        // GOTO RET
+        self.write("@R6");
+        self.write("D=M");
+        self.write("@4");
+        self.write("D=D-A");
+        self.write("A=D");
+        self.write("A=M");
+        self.write("0;JMP");
+
+        self.function_name.pop();
+    }
 
     pub fn write_function(&mut self, func_name: &str, num_locals: u8) {
-        self.set_current_func(Some(func_name.to_string()))
+        let func_name = format!("{}__{}", self.current_filename, func_name);
+        self.function_name.push(&func_name);
+        self.label(&format!("({})", func_name));
+
+        for k in 0..num_locals {
+            self.write("@LCL");
+            self.write("D=M");
+            self.write(&format!("@{}", k));
+            self.write("D=D+A");
+
+            // store address in @R13
+            self.write("@R13");
+            self.write("M=D");
+
+            // pop_stack value
+            self.write("@0");
+            self.write("D=A");
+
+            // update address to popped value
+            self.write("@R13");
+            self.write("A=M");
+            self.write("M=D");
+        }
     }
 
     pub fn comment(&mut self, comment: &str) {
@@ -251,14 +413,14 @@ impl<'a> CodeWriter<'a> {
 
     fn write_double_operand(&mut self) {
         // get first operand
-        self.write_single_operand();
+        self.pop_stack();
 
         // get second operand
         self.write("@SP");
         self.write("AM=M-1");
     }
 
-    fn write_single_operand(&mut self) {
+    fn pop_stack(&mut self) {
         // get first operand
         self.write("@SP");
         self.write("AM=M-1");
