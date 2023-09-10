@@ -1,5 +1,6 @@
 use crate::op_code::{LabelOpCode, OpCode, SegmentOpCode};
 use anyhow::{Ok, Result};
+use rand::{distributions::Alphanumeric, Rng};
 use std::io::Write;
 
 // const SP: u8 = 0; // stores the memory address of the topmost stack value
@@ -58,16 +59,18 @@ pub struct CodeWriter<'a> {
 }
 
 impl<'a> CodeWriter<'a> {
-    pub fn new(writer: &'a mut dyn Write) -> Self {
+    pub fn new(writer: &'a mut dyn Write, bootstrap: bool) -> Self {
         let mut code_writer = Self {
             writer,
             lines_written: 0,
-            current_filename: "Main".to_owned(),
+            current_filename: "Sys".to_owned(),
             function_name: FunctionNameStack::new(),
         };
 
         // VM Initialization
-        code_writer.write_init();
+        if bootstrap {
+            code_writer.write_init();
+        }
 
         code_writer
     }
@@ -75,10 +78,13 @@ impl<'a> CodeWriter<'a> {
     fn write_init(&mut self) {
         // bootstrap code
         // this must be placed at the beginning of the output file
+        self.write("@256");
+        self.write("D=A");
+        self.write("@SP");
+        self.write_call("Sys.init", 0)
     }
 
     pub fn set_current_filename(&mut self, filename: &str) {
-        println!("current file name >>> {}", filename);
         self.current_filename = filename.to_owned()
     }
 
@@ -87,7 +93,7 @@ impl<'a> CodeWriter<'a> {
         if func_name.is_some() {
             func_name.unwrap()
         } else {
-            "Main".to_owned()
+            "Sys".to_owned()
         }
     }
 
@@ -195,7 +201,7 @@ impl<'a> CodeWriter<'a> {
             match op_code.segment {
                 "temp" => self.write(&format!("@{}", 5 + op_code.offset)),
                 "pointer" => self.write(&format!("@{}", 3 + op_code.offset)),
-                "static" => self.write(&format!("@{}.{}", self.current_filename, op_code.offset)), // TODO: recheck if filename should be for individual compiled files or output file
+                "static" => self.write(&format!("@{}.{}", self.current_filename, op_code.offset)),
                 _ => {}
             }
 
@@ -240,8 +246,9 @@ impl<'a> CodeWriter<'a> {
 
     pub fn write_call(&mut self, func_name: &str, num_args: u8) {
         // push return-address
-        let return_address = format!("$ret__{}", 1);
-        self.write(&format!("@{}", return_address));
+        let fn_name = self.get_current_func();
+        let return_address = format!("$ret__{}", Self::gen_return_string());
+        self.write(&format!("@{}__{}", fn_name, return_address));
         self.write("D=A");
         self.write_to_stack();
 
@@ -268,7 +275,9 @@ impl<'a> CodeWriter<'a> {
         // ARG = SP-n-5
         self.write("@SP");
         self.write("D=M");
-        self.write(&format!("@{}", num_args - 5));
+        self.write(&format!("@{}", num_args));
+        self.write("D=D-A");
+        self.write("@5");
         self.write("D=D-A");
         self.write("@ARG");
         self.write("M=D");
@@ -280,7 +289,8 @@ impl<'a> CodeWriter<'a> {
         self.write("M=D");
 
         // goto f
-        self.write_goto(&LabelOpCode { label: func_name });
+        self.write(&format!("@{}", func_name));
+        self.write("0;JMP");
 
         // (return-address)
         self.write_label(&return_address);
@@ -356,11 +366,7 @@ impl<'a> CodeWriter<'a> {
         self.write("M=D");
 
         // GOTO RET
-        self.write("@R6");
-        self.write("D=M");
-        self.write("@4");
-        self.write("D=D-A");
-        self.write("A=D");
+        self.write("@R7");
         self.write("A=M");
         self.write("0;JMP");
 
@@ -368,7 +374,6 @@ impl<'a> CodeWriter<'a> {
     }
 
     pub fn write_function(&mut self, func_name: &str, num_locals: u8) {
-        let func_name = format!("{}__{}", self.current_filename, func_name);
         self.function_name.push(&func_name);
         self.label(&format!("({})", func_name));
 
@@ -438,5 +443,13 @@ impl<'a> CodeWriter<'a> {
         self.write(&format!("@{}", self.lines_written + 3));
         self.write("0;JMP");
         self.write("D=-1")
+    }
+
+    fn gen_return_string() -> String {
+        rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(7)
+            .map(char::from)
+            .collect()
     }
 }

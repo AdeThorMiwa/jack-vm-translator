@@ -10,11 +10,14 @@ struct Args {
 
     #[arg(short, long)]
     output: String,
+
+    #[arg(short, long)]
+    bootstrap: bool,
 }
 
 fn main() -> Result<()> {
     let cfg = Args::parse();
-    let mut translator = Translator::new(cfg.input, cfg.output);
+    let mut translator = Translator::new(cfg.input, cfg.output, cfg.bootstrap);
     translator.translate().context("Error during translation")?;
     Ok(())
 }

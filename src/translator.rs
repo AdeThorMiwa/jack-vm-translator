@@ -5,13 +5,15 @@ use std::{fs::File, io::BufWriter, path::Path};
 pub struct Translator {
     input_filepath: String,
     output_filepath: String,
+    bootstrap: bool,
 }
 
 impl Translator {
-    pub fn new(input_filepath: String, output_filepath: String) -> Self {
+    pub fn new(input_filepath: String, output_filepath: String, bootstrap: bool) -> Self {
         Self {
             input_filepath,
             output_filepath,
+            bootstrap,
         }
     }
 
@@ -21,7 +23,7 @@ impl Translator {
         let output_file =
             File::create(self.output_filepath.as_str()).context("Error creating output file")?;
         let mut writer = BufWriter::new(output_file);
-        let mut code_writer = CodeWriter::new(&mut writer);
+        let mut code_writer = CodeWriter::new(&mut writer, self.bootstrap);
 
         for file in input_files {
             let file = Path::new(&file);
